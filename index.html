@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Random Drill Generator</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 24px; line-height: 1.6; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    input { padding: 8px 10px; font-size: 16px; }
+    #qn { width: 120px; }
+    button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-top: 16px; }
+    .q { font-size: 20px; font-weight: 700; }
+    .meta { color: #666; margin-top: 6px; }
+    .ans { margin-top: 14px; font-size: 18px; }
+    .hidden { display: none; }
+    .status { margin-top: 10px; color: #333; }
+
+    .answerRow { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+    #userAnswer { width: 260px; }
+    .result { margin-top: 10px; font-weight: 700; }
+    .ok { color: #0a7; }
+    .ng { color: #c33; }
+  </style>
+</head>
+<body>
+  <h1>Random Drill Generator</h1>
+
+  <div class="row">
+    <label>How many questions?</label>
+    <input id="qn" type="number" min="1" max="9999" value="20" />
+    <button id="startBtn">開始</button>
+    <button id="nextBtn" class="hidden">Next</button>
+    <button id="showBtn" class="hidden">See the answer</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="card hidden" id="card">
+    <div class="q" id="question"></div>
+    <div class="meta" id="meta"></div>
+
+    <div class="answerRow">
+      <label for="userAnswer">回答：</label>
+      <input id="userAnswer" type="text" placeholder="請用平假名輸入 → Enter" autocomplete="off" />
+    </div>
+
+    <div class="result hidden" id="result"></div>
+    <div class="ans hidden" id="answer"></div>
+  </div>
+
+<script>
+  // ---- 読み関数（JS移植） ----
+  function digitYomiDefault(d){
+    const y = ["れい","いち","に","さん","よん","ご","ろく","なな","はち","きゅう"];
+    return (d >= 0 && d <= 9) ? y[d] : "";
+  }
+
+  function yomiNumberDefault(n){
+    // 0..99
+    if (n < 0 || n > 99) return "（範囲外）";
+    if (n < 10) return digitYomiDefault(n);
+
+    const tens = Math.floor(n / 10);
+    const ones = n % 10;
+
+    let out = "";
+    if (tens === 1) out += "じゅう";
+    else out += digitYomiDefault(tens) + "じゅう";
+
+    if (ones !== 0) out += digitYomiDefault(ones);
+    return out;
+  }
+
+  function yomiHour(h){
+    // 0..24
+    if (h < 0 || h > 24) return "（範囲外）";
+    if (h === 0) return "れいじ";
+    if (h === 4) return "よじ";
+    if (h === 9) return "くじ";
+    if (h === 7) return "しちじ（または ななじ）";
+    return yomiNumberDefault(h) + "じ";
+  }
+
+  function yomiDay(d){
+    // 1..31
+    if (d < 1 || d > 31) return "（範囲外）";
+    const special = {
+      1:"ついたち", 2:"ふつか", 3:"みっか", 4:"よっか", 5:"いつか",
+      6:"むいか", 7:"なのか", 8:"ようか", 9:"ここのか", 10:"とおか",
+      14:"じゅうよっか", 20:"はつか", 24:"にじゅうよっか"
+    };
+    if (special[d]) return special[d];
+    return yomiNumberDefault(d) + "にち";
+  }
+
+  function yomiMonth(m){
+    // 1..12
+    if (m < 1 || m > 12) return "（範囲外）";
+    if (m === 4) return "しがつ";
+    if (m === 7) return "しちがつ";
+    if (m === 9) return "くがつ";
+    return yomiNumberDefault(m) + "がつ";
+  }
+
+  // ---- 正誤判定用：入力をゆるく正規化 ----
+  function norm(s){
+    return (s ?? "")
+      .trim()
+      .replace(/\s+/g, "")          // 空白削除
+      .replace(/[．.、，,]/g, "")   // 句読点っぽいの削除
+      .replace(/[（）()]/g, "");    // 括弧削除（見やすさ用）
+  }
+
+  // ---- 出題ロジック ----
+  let total = 0;
+  let idx = 0;
+  let current = null;   // {prompt, meta, ans, accept[]}
+  let answered = false;
+
+  function randInt(min, maxInclusive){
+    return Math.floor(Math.random() * (maxInclusive - min + 1)) + min;
+  }
+
+  function makeQuestion(i){
+    const kind = randInt(0, 2); // 0=time 1=date 2=month
+
+    if (kind === 0){
+      const h = randInt(0, 24);
+      const ans = yomiHour(h);
+
+      // 7時だけ複数解を許容
+      let accept = [ans];
+      if (h === 7){
+        accept = ["しちじ", "ななじ", "しちじ（または ななじ）", "しちじ(またはななじ)"];
+      }
+
+      return {
+        prompt: `Q${String(i).padStart(2,"0")} [時刻] ${h}時 → 怎麼唸？`,
+        meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
+        ans,
+        accept
+      };
+    }
+
+    if (kind === 1){
+      const d = randInt(1, 31);
+      const ans = yomiDay(d);
+      return {
+        prompt: `Q${String(i).padStart(2,"0")} [日付] ${d}日 → 怎麼唸？`,
+        meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
+        ans,
+        accept: [ans]
+      };
+    }
+
+    const m = randInt(1, 12);
+    const ans = yomiMonth(m);
+    return {
+      prompt: `Q${String(i).padStart(2,"0")} [月] ${m}月 → 怎麼唸？`,
+      meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
+      ans,
+      accept: [ans]
+    };
+  }
+
+  function render(){
+    const card = document.getElementById("card");
+    const q = document.getElementById("question");
+    const meta = document.getElementById("meta");
+    const ans = document.getElementById("answer");
+    const status = document.getElementById("status");
+    const result = document.getElementById("result");
+
+    if (!current){
+      card.classList.add("hidden");
+      status.textContent = "";
+      return;
+    }
+
+    card.classList.remove("hidden");
+    q.textContent = current.prompt;
+    meta.textContent = current.meta;
+
+    ans.textContent = "正解： " + current.ans;
+    status.textContent = `Progress: ${idx}/${total}`;
+
+    if (answered){
+      ans.classList.remove("hidden");
+      result.classList.remove("hidden");
+    } else {
+      ans.classList.add("hidden");
+      result.classList.add("hidden");
+    }
+  }
+
+  function resetAnswerUI(){
+    const input = document.getElementById("userAnswer");
+    const result = document.getElementById("result");
+    input.value = "";
+    input.disabled = false;
+    result.textContent = "";
+    result.className = "result hidden";
+  }
+
+  function focusAnswer(){
+    const input = document.getElementById("userAnswer");
+    input.focus();
+  }
+
+  function start(){
+    total = parseInt(document.getElementById("qn").value, 10);
+    if (!Number.isFinite(total) || total <= 0) total = 20;
+
+    idx = 1;
+    current = makeQuestion(idx);
+    answered = false;
+
+    document.getElementById("startBtn").classList.add("hidden");
+    document.getElementById("nextBtn").classList.remove("hidden");
+    document.getElementById("showBtn").classList.remove("hidden");
+
+    resetAnswerUI();
+    render();
+    focusAnswer();
+  }
+
+  function checkAnswer(){
+    if (!current || answered) return;
+
+    const input = document.getElementById("userAnswer");
+    const result = document.getElementById("result");
+    const user = norm(input.value);
+
+    // 空入力なら何もしない
+    if (!user) return;
+
+    const ok = current.accept.some(a => norm(a) === user);
+
+    answered = true;
+    input.disabled = true;
+
+    result.classList.remove("hidden");
+    result.classList.toggle("ok", ok);
+    result.classList.toggle("ng", !ok);
+
+    if (ok){
+      result.textContent = "正解！ ✅";
+    } else {
+      result.textContent = "不正解… ❌（正解を表示します）";
+    }
+
+    render();
+  }
+
+  function showAnswer(){
+    if (!current || answered) {
+      // すでに判定済みなら何もしない
+      return;
+    }
+    // ギブアップ扱い：答え表示＆入力ロック
+    const input = document.getElementById("userAnswer");
+    const result = document.getElementById("result");
+    answered = true;
+    input.disabled = true;
+
+    result.classList.remove("hidden");
+    result.classList.add("ng");
+    result.textContent = "ギブアップ（正解を表示します）";
+
+    render();
+  }
+
+  function next(){
+    if (!current) return;
+
+    if (idx >= total){
+      current = null;
+      answered = false;
+
+      document.getElementById("status").textContent = "終了！";
+      document.getElementById("startBtn").classList.remove("hidden");
+      document.getElementById("nextBtn").classList.add("hidden");
+      document.getElementById("showBtn").classList.add("hidden");
+
+      render();
+      return;
+    }
+
+    idx++;
+    current = makeQuestion(idx);
+    answered = false;
+
+    resetAnswerUI();
+    render();
+    focusAnswer();
+  }
+
+  // ---- イベント ----
+  document.getElementById("startBtn").addEventListener("click", start);
+  document.getElementById("showBtn").addEventListener("click", showAnswer);
+  document.getElementById("nextBtn").addEventListener("click", next);
+
+  // 回答欄でEnter → 判定
+  document.getElementById("userAnswer").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      checkAnswer();
+    }
+  });
+</script>
+</body>
+</html>
