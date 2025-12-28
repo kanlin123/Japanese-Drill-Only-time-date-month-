@@ -8,7 +8,7 @@
     body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 24px; line-height: 1.6; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
     input { padding: 8px 10px; font-size: 16px; }
-    #qn { width: 120px; }
+    #qn { width: 160px; }
     button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-top: 16px; }
     .q { font-size: 20px; font-weight: 700; }
@@ -22,9 +22,22 @@
     .result { margin-top: 10px; font-weight: 700; }
     .ok { color: #0a7; }
     .ng { color: #c33; }
+
+    /* --- Cheat sheet view --- */
+    #cheatView { max-width: 980px; }
+    #cheatTop { display:flex; align-items:center; gap:12px; margin-bottom: 12px; }
+    #cheatTop h2 { margin: 0; font-size: 22px; }
+    .sheetGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .sheetCard { border: 1px solid #ddd; border-radius: 10px; padding: 12px; background: #fff; }
+    .sheetCard h3 { margin: 0 0 8px 0; font-size: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 14px; }
+    th { color: #666; font-weight: 600; }
   </style>
 </head>
 <body>
+
+<div id="mainView">
   <h1>Random Drill Generator</h1>
 
   <div class="row">
@@ -33,6 +46,7 @@
     <button id="startBtn">開始</button>
     <button id="nextBtn" class="hidden">Next</button>
     <button id="showBtn" class="hidden">See the answer</button>
+    <button id="allBtn" class="hidden">All pattern</button>
   </div>
 
   <div class="status" id="status"></div>
@@ -49,6 +63,16 @@
     <div class="result hidden" id="result"></div>
     <div class="ans hidden" id="answer"></div>
   </div>
+</div>
+
+<!-- Cheat sheet only view -->
+<div id="cheatView" class="hidden">
+  <div id="cheatTop">
+    <button id="escBtn">ESC</button>
+    <h2>All patterns</h2>
+  </div>
+  <div id="cheatContent"></div>
+</div>
 
 <script>
   // ---- 読み関数（JS移植） ----
@@ -79,7 +103,7 @@
     if (h === 0) return "れいじ";
     if (h === 4) return "よじ";
     if (h === 9) return "くじ";
-    if (h === 7) return "しちじ（または ななじ）";
+    if (h === 7) return "しちじ（or ななじ）";
     return yomiNumberDefault(h) + "じ";
   }
 
@@ -104,13 +128,39 @@
     return yomiNumberDefault(m) + "がつ";
   }
 
+  // ---- 助数詞「つ」(1..9) ※10つは削除 ----
+  function yomiTsu(n){
+    const map = {
+      1:"ひとつ", 2:"ふたつ", 3:"みっつ", 4:"よっつ", 5:"いつつ",
+      6:"むっつ", 7:"ななつ", 8:"やっつ", 9:"ここのつ"
+    };
+    return map[n] ?? "（範囲外）";
+  }
+
+  // ---- 助数詞「こ」(1..20) ----
+  function yomiKo(n){
+    if (n < 1 || n > 20) return "（範囲外）";
+
+    const base = {
+      1:"いっこ", 2:"にこ", 3:"さんこ", 4:"よんこ", 5:"ごこ",
+      6:"ろっこ", 7:"ななこ", 8:"はっこ", 9:"きゅうこ"
+    };
+    if (n <= 9) return base[n];
+
+    if (n === 10) return "じゅっこ（or じっこ）";
+    if (n === 20) return "にじゅっこ（or にじっこ）";
+
+    const ones = n % 10; // 11..19
+    return "じゅう" + base[ones];
+  }
+
   // ---- 正誤判定用：入力をゆるく正規化 ----
   function norm(s){
     return (s ?? "")
       .trim()
-      .replace(/\s+/g, "")          // 空白削除
-      .replace(/[．.、，,]/g, "")   // 句読点っぽいの削除
-      .replace(/[（）()]/g, "");    // 括弧削除（見やすさ用）
+      .replace(/\s+/g, "")
+      .replace(/[．.、，,]/g, "")
+      .replace(/[（）()]/g, "");
   }
 
   // ---- 出題ロジック ----
@@ -124,7 +174,8 @@
   }
 
   function makeQuestion(i){
-    const kind = randInt(0, 2); // 0=time 1=date 2=month
+    // 0=time 1=date 2=month 3=つ 4=こ
+    const kind = randInt(0, 4);
 
     if (kind === 0){
       const h = randInt(0, 24);
@@ -133,7 +184,7 @@
       // 7時だけ複数解を許容
       let accept = [ans];
       if (h === 7){
-        accept = ["しちじ", "ななじ", "しちじ（または ななじ）", "しちじ(またはななじ)"];
+        accept = ["しちじ", "ななじ", "しちじ（or ななじ）", "しちじ(orななじ)"];
       }
 
       return {
@@ -155,13 +206,44 @@
       };
     }
 
-    const m = randInt(1, 12);
-    const ans = yomiMonth(m);
+    if (kind === 2){
+      const m = randInt(1, 12);
+      const ans = yomiMonth(m);
+      return {
+        prompt: `Q${String(i).padStart(2,"0")} [月] ${m}月 → 怎麼唸？`,
+        meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
+        ans,
+        accept: [ans]
+      };
+    }
+
+    if (kind === 3){
+      const n = randInt(1, 9);
+      const ans = yomiTsu(n);
+      return {
+        prompt: `Q${String(i).padStart(2,"0")} [つ] ${n}つ → 怎麼唸？`,
+        meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
+        ans,
+        accept: [ans]
+      };
+    }
+
+    // kind === 4 「こ」：1..20
+    const n = randInt(1, 20);
+    const ans = yomiKo(n);
+
+    let accept = [ans];
+    if (n === 10){
+      accept = ["じゅっこ", "じっこ", "じゅっこ（or じっこ）", "じゅっこ(orじっこ)"];
+    } else if (n === 20){
+      accept = ["にじゅっこ", "にじっこ", "にじゅっこ（or にじっこ）", "にじゅっこ(orにじっこ)"];
+    }
+
     return {
-      prompt: `Q${String(i).padStart(2,"0")} [月] ${m}月 → 怎麼唸？`,
+      prompt: `Q${String(i).padStart(2,"0")} [こ] ${n}こ → 怎麼唸？`,
       meta: "請在答案欄輸入後按 Enter（建議使用平假名）",
       ans,
-      accept: [ans]
+      accept
     };
   }
 
@@ -183,12 +265,13 @@
     q.textContent = current.prompt;
     meta.textContent = current.meta;
 
-    ans.textContent = "正解： " + current.ans;
+    ans.textContent = "答案： " + current.ans;
     status.textContent = `Progress: ${idx}/${total}`;
 
     if (answered){
       ans.classList.remove("hidden");
-      result.classList.remove("hidden");
+      if (result.textContent.trim() !== "") result.classList.remove("hidden");
+      else result.classList.add("hidden");
     } else {
       ans.classList.add("hidden");
       result.classList.add("hidden");
@@ -205,8 +288,7 @@
   }
 
   function focusAnswer(){
-    const input = document.getElementById("userAnswer");
-    input.focus();
+    document.getElementById("userAnswer").focus();
   }
 
   function start(){
@@ -220,6 +302,7 @@
     document.getElementById("startBtn").classList.add("hidden");
     document.getElementById("nextBtn").classList.remove("hidden");
     document.getElementById("showBtn").classList.remove("hidden");
+    document.getElementById("allBtn").classList.remove("hidden");
 
     resetAnswerUI();
     render();
@@ -232,8 +315,6 @@
     const input = document.getElementById("userAnswer");
     const result = document.getElementById("result");
     const user = norm(input.value);
-
-    // 空入力なら何もしない
     if (!user) return;
 
     const ok = current.accept.some(a => norm(a) === user);
@@ -245,29 +326,23 @@
     result.classList.toggle("ok", ok);
     result.classList.toggle("ng", !ok);
 
-    if (ok){
-      result.textContent = "正解！ ✅";
-    } else {
-      result.textContent = "不正解… ❌（正解を表示します）";
-    }
+    // ★ 変更：正解！→正確！
+    result.textContent = ok ? "正確！ ✅" : "不正解… ❌（正解を表示します）";
 
     render();
   }
 
   function showAnswer(){
-    if (!current || answered) {
-      // すでに判定済みなら何もしない
-      return;
-    }
-    // ギブアップ扱い：答え表示＆入力ロック
+    if (!current || answered) return;
+
     const input = document.getElementById("userAnswer");
     const result = document.getElementById("result");
     answered = true;
     input.disabled = true;
 
-    result.classList.remove("hidden");
-    result.classList.add("ng");
-    result.textContent = "ギブアップ（正解を表示します）";
+    // 結果欄は表示しない（空）
+    result.textContent = "";
+    result.className = "result hidden";
 
     render();
   }
@@ -283,6 +358,7 @@
       document.getElementById("startBtn").classList.remove("hidden");
       document.getElementById("nextBtn").classList.add("hidden");
       document.getElementById("showBtn").classList.add("hidden");
+      document.getElementById("allBtn").classList.add("hidden");
 
       render();
       return;
@@ -297,16 +373,80 @@
     focusAnswer();
   }
 
+  // ---------- All pattern view ----------
+  function buildTable(title, rows){
+    const trs = rows.map(r => `<tr><td>${r.left}</td><td>${r.right}</td></tr>`).join("");
+    return `
+      <div class="sheetCard">
+        <h3>${title}</h3>
+        <table>
+          <thead><tr><th>Number</th><th>Reading</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function showAllPatterns(){
+    const mainView = document.getElementById("mainView");
+    const cheatView = document.getElementById("cheatView");
+    const cheatContent = document.getElementById("cheatContent");
+
+    const hourRows = [];
+    for (let h = 0; h <= 24; h++) hourRows.push({ left: `${h}時`, right: yomiHour(h) });
+
+    const dayRows = [];
+    for (let d = 1; d <= 31; d++) dayRows.push({ left: `${d}日`, right: yomiDay(d) });
+
+    const monthRows = [];
+    for (let m = 1; m <= 12; m++) monthRows.push({ left: `${m}月`, right: yomiMonth(m) });
+
+    const tsuRows = [];
+    for (let n = 1; n <= 9; n++) tsuRows.push({ left: `${n}つ`, right: yomiTsu(n) });
+
+    const koRows = [];
+    for (let n = 1; n <= 20; n++) koRows.push({ left: `${n}こ`, right: yomiKo(n) });
+
+    cheatContent.innerHTML = `
+      <div class="sheetGrid">
+        ${buildTable("時刻 (0〜24時)", hourRows)}
+        ${buildTable("日付 (1〜31日)", dayRows)}
+        ${buildTable("月 (1〜12月)", monthRows)}
+        ${buildTable("助数詞「つ」(1〜9)", tsuRows)}
+        ${buildTable("助数詞「こ」(1〜20)", koRows)}
+      </div>
+    `;
+
+    mainView.classList.add("hidden");
+    cheatView.classList.remove("hidden");
+  }
+
+  function exitAllPatterns(){
+    document.getElementById("mainView").classList.remove("hidden");
+    document.getElementById("cheatView").classList.add("hidden");
+    if (current && !answered) focusAnswer();
+  }
+
   // ---- イベント ----
   document.getElementById("startBtn").addEventListener("click", start);
   document.getElementById("showBtn").addEventListener("click", showAnswer);
   document.getElementById("nextBtn").addEventListener("click", next);
+  document.getElementById("allBtn").addEventListener("click", showAllPatterns);
+  document.getElementById("escBtn").addEventListener("click", exitAllPatterns);
 
-  // 回答欄でEnter → 判定
   document.getElementById("userAnswer").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       checkAnswer();
+    }
+  });
+
+  // Escapeキーでも戻れる
+  document.addEventListener("keydown", (e) => {
+    const cheatView = document.getElementById("cheatView");
+    if (e.key === "Escape" && !cheatView.classList.contains("hidden")) {
+      e.preventDefault();
+      exitAllPatterns();
     }
   });
 </script>
